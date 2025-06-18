@@ -360,6 +360,12 @@ func getBlockFromRPC(height int) (*walletrpc.CompactBlock, error) {
 		return nil, fmt.Errorf("error decoding getblock output: %w", err)
 	}
 
+	// Debug logging for BitcoinZ
+	if height == 1577983 {
+		Log.Info("BitcoinZ DEBUG: Fetching block 1577983 with known transaction")
+		Log.Info("BitcoinZ DEBUG: Block data size:", len(blockData))
+	}
+	
 	block := parser.NewBlock()
 	rest, err := block.ParseFromSlice(blockData)
 	if err != nil {
@@ -370,6 +376,15 @@ func getBlockFromRPC(height int) (*walletrpc.CompactBlock, error) {
 	}
 	if block.GetHeight() != height {
 		return nil, errors.New("received unexpected height block")
+	}
+	
+	// Debug: Check if this is block 1577983
+	if height == 1577983 {
+		Log.Info("BitcoinZ DEBUG: Block 1577983 has", len(block.Transactions()), "transactions")
+		for i, tx := range block.Transactions() {
+			compactTx := tx.ToCompact(i)
+			Log.Info("BitcoinZ DEBUG: Transaction", i, "has", len(compactTx.Outputs), "shielded outputs")
+		}
 	}
 	for i, t := range block.Transactions() {
 		txid, err := hex.DecodeString(block1.Tx[i])

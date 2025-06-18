@@ -8,6 +8,7 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/bitcoinz-xyz/lightwalletd/parser/internal/bytestring"
 	"github.com/bitcoinz-xyz/lightwalletd/walletrpc"
@@ -184,6 +185,12 @@ type output struct {
 
 func (p *output) ParseFromSlice(data []byte, version uint32) ([]byte, error) {
 	s := bytestring.String(data)
+	
+	// Debug logging for BitcoinZ
+	log.Printf("BitcoinZ DEBUG: Parsing Sapling output, data length: %d, version: %d", len(data), version)
+	if len(data) >= 100 {
+		log.Printf("BitcoinZ DEBUG: First 100 bytes: %x", data[:100])
+	}
 
 	if !s.Skip(32) {
 		return nil, errors.New("could not skip cv")
@@ -192,14 +199,29 @@ func (p *output) ParseFromSlice(data []byte, version uint32) ([]byte, error) {
 	if !s.ReadBytes(&p.cmu, 32) {
 		return nil, errors.New("could not read cmu")
 	}
+	log.Printf("BitcoinZ DEBUG: Read cmu: %x", p.cmu)
 
 	if !s.ReadBytes(&p.ephemeralKey, 32) {
 		return nil, errors.New("could not read ephemeralKey")
+	}
+	log.Printf("BitcoinZ DEBUG: Read ephemeralKey: %x", p.ephemeralKey)
+	
+	// Check if ephemeralKey is all zeros
+	allZeros := true
+	for _, b := range p.ephemeralKey {
+		if b != 0 {
+			allZeros = false
+			break
+		}
+	}
+	if allZeros {
+		log.Printf("BitcoinZ WARNING: ephemeralKey is all zeros!")
 	}
 
 	if !s.ReadBytes(&p.encCiphertext, 580) {
 		return nil, errors.New("could not read encCiphertext")
 	}
+	log.Printf("BitcoinZ DEBUG: Read encCiphertext first 52 bytes: %x", p.encCiphertext[:52])
 
 	if !s.Skip(80) {
 		return nil, errors.New("could not skip outCiphertext")
@@ -213,11 +235,26 @@ func (p *output) ParseFromSlice(data []byte, version uint32) ([]byte, error) {
 }
 
 func (p *output) ToCompact() *walletrpc.CompactSaplingOutput {
-	return &walletrpc.CompactSaplingOutput{
+	result := &walletrpc.CompactSaplingOutput{
 		Cmu:          p.cmu,
 		EphemeralKey: p.ephemeralKey,
 		Ciphertext:   p.encCiphertext[:52],
 	}
+	
+	// BitcoinZ: Validate EPK is present and correct size
+	if len(result.EphemeralKey) != 32 {
+		log.Printf("BitcoinZ WARNING: Invalid ephemeralKey length in ToCompact: %d (expected 32)", len(result.EphemeralKey))
+		if len(result.EphemeralKey) == 0 {
+			log.Printf("BitcoinZ ERROR: ephemeralKey is empty!")
+		}
+	}
+	
+	// Debug: Log the EPK being returned
+	if len(result.EphemeralKey) > 0 {
+		log.Printf("BitcoinZ DEBUG: ToCompact returning EPK: %x", result.EphemeralKey)
+	}
+	
+	return result
 }
 
 // joinSplit is a JoinSplit description as described in 7.2 of the BitcoinZ
@@ -439,8 +476,10 @@ func (tx *Transaction) parseV4(data []byte) ([]byte, error) {
 	if !s.ReadCompactSize(&outputCount) {
 		return nil, errors.New("could not read nShieldedOutput")
 	}
+	log.Printf("BitcoinZ DEBUG: Parsing %d shielded outputs", outputCount)
 	tx.shieldedOutputs = make([]output, outputCount)
 	for i := 0; i < outputCount; i++ {
+		log.Printf("BitcoinZ DEBUG: Parsing shielded output %d/%d", i+1, outputCount)
 		newOutput := &tx.shieldedOutputs[i]
 		s, err = newOutput.ParseFromSlice([]byte(s), 4)
 		if err != nil {
@@ -589,6 +628,8 @@ func (tx *Transaction) parseV5(data []byte) ([]byte, error) {
 // ParseFromSlice deserializes a single transaction from the given data.
 func (tx *Transaction) ParseFromSlice(data []byte) ([]byte, error) {
 	s := bytestring.String(data)
+	
+	log.Printf("BitcoinZ DEBUG: Parsing transaction, data length: %d", len(data))
 
 	// declare here to prevent shadowing problems in cryptobyte assignments
 	var err error
@@ -610,6 +651,8 @@ func (tx *Transaction) ParseFromSlice(data []byte) ([]byte, error) {
 	if !s.ReadUint32(&tx.nVersionGroupID) {
 		return nil, errors.New("could not read nVersionGroupId")
 	}
+	
+	log.Printf("BitcoinZ DEBUG: Transaction version: %d, versionGroupID: %x", tx.version, tx.nVersionGroupID)
 	// parse the main part of the transaction
 	if tx.version <= 4 {
 		s, err = tx.parseV4([]byte(s))
